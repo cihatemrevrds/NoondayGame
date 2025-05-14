@@ -9,10 +9,13 @@ const voting = require('./voting');
 const teamManager = require('./teamManager');
 
 // Expose role actions as cloud functions
-exports.doctorProtect = functions.https.onRequest(roleActions.doctorProtect);
+exports.innkeeperProtect = functions.https.onRequest(roleActions.innkeeperProtect);
 exports.gunmanKill = functions.https.onRequest(roleActions.gunmanKill);
 exports.sheriffInvestigate = functions.https.onRequest(roleActions.sheriffInvestigate);
 exports.prostituteBlock = functions.https.onRequest(roleActions.prostituteBlock);
+exports.chieftainKill = functions.https.onRequest(roleActions.chieftainKill);
+exports.peeperWatch = functions.https.onRequest(roleActions.peeperWatch);
+exports.gunslingerShoot = functions.https.onRequest(roleActions.gunslingerShoot);
 
 // Expose game phase functions
 exports.startGame = functions.https.onRequest(gamePhase.startGame);

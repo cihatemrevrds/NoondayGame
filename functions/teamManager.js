@@ -3,8 +3,8 @@ const db = admin.firestore();
 
 // Define team structures
 const teams = {
-    Town: ['Doctor', 'Sheriff', 'Mayor', 'Bodyguard', 'Vigilante', 'Jailor', 'Prostitute'],
-    Bandit: ['Gunman', 'Godfather', 'Framer', 'Blackmailer', 'Consigliere'],
+    Town: ['Innkeeper', 'Sheriff', 'Mayor', 'Bodyguard', 'Vigilante', 'Jailor', 'Prostitute', 'Peeper', 'Gunslinger'],
+    Bandit: ['Gunman', 'Chieftain', 'Framer', 'Blackmailer', 'Consigliere'],
     Neutral: ['Jester', 'Serial Killer', 'Arsonist', 'Executioner', 'Witch']
 };
 

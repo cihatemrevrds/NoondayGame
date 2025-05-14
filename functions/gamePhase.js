@@ -95,62 +95,176 @@ exports.advancePhase = async (req, res) => {
             // First check who is blocked by prostitute
             const blockedPlayerId = roleDataUpdate.prostitute?.blockedId || null;
 
-            // Process night kills from Gunman if not blocked
-            if (roleDataUpdate.gunman && roleDataUpdate.gunman.targetId) {
+            // Determine who will be the killer and the target
+            let killerRole = 'Gunman';
+            let targetId = null;
+            let killerId = null;
+
+            // Check if chieftain has issued a kill order (and is not blocked)
+            const chieftainId = players.find(p => p.role === 'Chieftain' && p.isAlive)?.id;
+            const isChieftainBlocked = chieftainId && chieftainId === blockedPlayerId;
+
+            if (roleDataUpdate.chieftain && roleDataUpdate.chieftain.targetId && !isChieftainBlocked) {
+                // Chieftain's order takes precedence
+                targetId = roleDataUpdate.chieftain.targetId;
+
+                if (roleDataUpdate.chieftain.hasGunman) {
+                    // Gunman executes chieftain's order
+                    killerRole = 'Gunman';
+                    killerId = players.find(p => p.role === 'Gunman' && p.isAlive)?.id;
+                } else {
+                    // Chieftain executes the kill directly
+                    killerRole = 'Chieftain';
+                    killerId = chieftainId;
+                }
+            } else if (roleDataUpdate.gunman && roleDataUpdate.gunman.targetId) {
+                // No chieftain order, use gunman's choice
                 const gunmanId = players.find(p => p.role === 'Gunman' && p.isAlive)?.id;
                 const isGunmanBlocked = gunmanId && gunmanId === blockedPlayerId;
 
                 if (!isGunmanBlocked) {
-                    const targetId = roleDataUpdate.gunman.targetId;
-                    const targetIndex = updatedPlayers.findIndex(p => p.id === targetId);
+                    targetId = roleDataUpdate.gunman.targetId;
+                    killerId = gunmanId;
+                }
+            }
 
-                    if (targetIndex !== -1) {
-                        const targetPlayer = updatedPlayers[targetIndex];
+            // Process the kill if we have a target and killer
+            if (targetId && killerId) {
+                const targetIndex = updatedPlayers.findIndex(p => p.id === targetId); if (targetIndex !== -1) {
+                    const targetPlayer = updatedPlayers[targetIndex];
 
-                        // Check if target is protected by doctor (if doctor is not blocked)
-                        const doctorId = players.find(p => p.role === 'Doctor' && p.isAlive)?.id;
-                        const isDoctorBlocked = doctorId && doctorId === blockedPlayerId;
-                        const isProtected = !isDoctorBlocked &&
-                            roleDataUpdate.doctor &&
-                            roleDataUpdate.doctor.protectedId === targetId;                        // Check if target is immune (add role-specific immunity checks here)
-                        const isImmune = targetPlayer.role === 'ImmuneRole'; // Replace with actual immune roles
+                    // Check if target is hosted by innkeeper (if innkeeper is not blocked)
+                    const innkeeperId = players.find(p => p.role === 'Innkeeper' && p.isAlive)?.id;
+                    const isInnkeeperBlocked = innkeeperId && innkeeperId === blockedPlayerId;
+                    const isProtected = !isInnkeeperBlocked &&
+                        roleDataUpdate.innkeeper &&
+                        roleDataUpdate.innkeeper.protectedId === targetId;
 
-                        // Kill the target if they're not protected or immune
-                        if (!isProtected && !isImmune) {
-                            updatedPlayers[targetIndex] = {
-                                ...targetPlayer,
-                                isAlive: false,
-                                killedBy: 'Gunman'
-                            };
-                        }
+                    // Check if target is immune (add role-specific immunity checks here)
+                    const isImmune = targetPlayer.role === 'ImmuneRole'; // Replace with actual immune roles
+
+                    // Kill the target if they're not protected or immune
+                    if (!isProtected && !isImmune) {
+                        updatedPlayers[targetIndex] = {
+                            ...targetPlayer,
+                            isAlive: false,
+                            killedBy: killerRole
+                        };
                     }
                 }
+            }
 
-                // Reset gunman target
+            // Reset targets
+            if (roleDataUpdate.gunman) {
                 roleDataUpdate.gunman = {
                     ...roleDataUpdate.gunman,
                     targetId: null
                 };
             }
 
-            // Reset doctor's protection but keep track of self-protection use
-            if (roleDataUpdate.doctor) {
-                roleDataUpdate.doctor = {
-                    ...roleDataUpdate.doctor,
-                    protectedId: null
+            if (roleDataUpdate.chieftain) {
+                roleDataUpdate.chieftain = {
+                    ...roleDataUpdate.chieftain,
+                    targetId: null
                 };
             }
 
-            // Reset prostitute's block
+            // Reset innkeeper's hosting
+            if (roleDataUpdate.innkeeper) {
+                roleDataUpdate.innkeeper = {
+                    ...roleDataUpdate.innkeeper,
+                    protectedId: null
+                };
+            }            // Reset prostitute's block
             if (roleDataUpdate.prostitute) {
                 roleDataUpdate.prostitute = {
                     ...roleDataUpdate.prostitute,
                     blockedId: null
                 };
             }
-        }
 
-        await lobbyRef.update({
+            // Process Peeper's watch action - collect list of visitors to the watched player
+            if (roleDataUpdate.peeper && roleDataUpdate.peeper.watchId) {
+                const watchedPlayerId = roleDataUpdate.peeper.watchId;
+                const visitors = [];
+
+                // Check all role actions that target other players and track who visited the watched player                // Innkeeper visit
+                if (roleDataUpdate.innkeeper && roleDataUpdate.innkeeper.protectedId === watchedPlayerId) {
+                    const innkeeperId = players.find(p => p.role === 'Innkeeper' && p.isAlive)?.id;
+                    const isInnkeeperBlocked = innkeeperId && innkeeperId === blockedPlayerId;
+
+                    if (innkeeperId && !isInnkeeperBlocked) {
+                        visitors.push({
+                            id: innkeeperId,
+                            name: players.find(p => p.id === innkeeperId)?.name || 'Unknown',
+                            role: 'visitor' // Don't reveal actual role, just that they visited
+                        });
+                    }
+                }
+
+                // Gunman visit
+                if (targetId === watchedPlayerId && killerId && killerRole === 'Gunman') {
+                    const isGunmanBlocked = killerId === blockedPlayerId;
+
+                    if (!isGunmanBlocked) {
+                        visitors.push({
+                            id: killerId,
+                            name: players.find(p => p.id === killerId)?.name || 'Unknown',
+                            role: 'visitor'
+                        });
+                    }
+                }
+
+                // Chieftain visit (if directly killing)
+                if (targetId === watchedPlayerId && killerId && killerRole === 'Chieftain') {
+                    const isChieftainBlocked = killerId === blockedPlayerId;
+
+                    if (!isChieftainBlocked) {
+                        visitors.push({
+                            id: killerId,
+                            name: players.find(p => p.id === killerId)?.name || 'Unknown',
+                            role: 'visitor'
+                        });
+                    }
+                }
+
+                // Sheriff visit
+                if (roleDataUpdate.sheriff && roleDataUpdate.sheriff.targetId === watchedPlayerId) {
+                    const sheriffId = players.find(p => p.role === 'Sheriff' && p.isAlive)?.id;
+                    const isSheriffBlocked = sheriffId && sheriffId === blockedPlayerId;
+
+                    if (sheriffId && !isSheriffBlocked) {
+                        visitors.push({
+                            id: sheriffId,
+                            name: players.find(p => p.id === sheriffId)?.name || 'Unknown',
+                            role: 'visitor'
+                        });
+                    }
+                }
+
+                // Prostitute visit
+                if (blockedPlayerId === watchedPlayerId) {
+                    const prostituteId = players.find(p => p.role === 'Prostitute' && p.isAlive)?.id;
+
+                    if (prostituteId) {
+                        visitors.push({
+                            id: prostituteId,
+                            name: players.find(p => p.id === prostituteId)?.name || 'Unknown',
+                            role: 'visitor'
+                        });
+                    }
+                }
+
+                // Update the peeper's visitor list
+                roleDataUpdate.peeper = {
+                    ...roleDataUpdate.peeper,
+                    visitors: visitors,
+                    watchResult: visitors.length > 0
+                        ? `${visitors.length} player(s) visited your target.`
+                        : 'No one visited your target.'
+                };
+            }
+        } await lobbyRef.update({
             phase: newPhase,
             dayCount: newDayCount,
             phaseStartedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -167,6 +281,15 @@ exports.advancePhase = async (req, res) => {
             if (isSheriffBlocked && roleDataUpdate.sheriff) {
                 await lobbyRef.update({
                     'roleData.sheriff.result': null
+                });
+            }
+        } else if (newPhase === 'night') {
+            // Reset Peeper's watch data when moving to a new night
+            if (roleDataUpdate.peeper) {
+                await lobbyRef.update({
+                    'roleData.peeper.watchId': null,
+                    'roleData.peeper.visitors': [],
+                    'roleData.peeper.watchResult': null
                 });
             }
         }
